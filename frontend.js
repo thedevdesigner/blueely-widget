@@ -343,24 +343,30 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
   const toEnd = () => requestAnimationFrame(() => { feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); });
   const mobile = () => matchMedia('(max-width:480px)').matches;
 
-  /* ---------- Clean Markdown Parser & Renderers ---------- */
+/* ---------- Stream & Network-Break Proof Markdown Parser ---------- */
   function renderMarkdown(rawText) {
     let text = String(rawText || '');
     
-    // 1. Convert Markdown links [Text](Url)
+    // 1. Parse completed [Text](Url) markdown links safely
     text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
       const cleanU = safeUrl(url);
       return cleanU ? `<a href="${cleanU}" target="_blank" rel="noopener noreferrer">${linkText}</a>` : linkText;
     });
     
-    // 2. Convert raw URLs into proper clickable anchor tags (with the closing </a> tag fixed!)
-    text = text.replace(/(https?:\/\/[^\s<"]+)/g, (url) => {
+    // 2. STREAM BREAK SAFETY NET: Catch dangling/broken markdown links caused by network drops
+    // If a link starts with [Text](... but never gets a closing parenthesis because the stream died, 
+    // this cleans it up into plain text so it doesn't leave ugly brackets on the screen.
+    text = text.replace(/\[([^\]]+)\]\(([^)]*)$/, '$1'); // Removes the broken dangling url wrapper at the very end
+    text = text.replace(/\[([^\]]*)$/, '$1');            // Removes an unclosed opening bracket at the very end
+
+    // 3. Pattern Match: Raw URLs (Protected against active markdown patterns)
+    text = text.replace(/(?<!\()\bhttps?:\/\/[^\s<"]+/g, (url) => {
       const cleanUrl = url.replace(/[.,)]+$/, '');
       const cleanU = safeUrl(cleanUrl);
       return cleanU ? `<a href="${cleanU}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>` : url;
     });
-    
-    // 3. Convert bold text **text**
+
+    // 4. Bold text **text**
     text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     
     return text;
