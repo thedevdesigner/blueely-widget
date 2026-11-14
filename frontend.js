@@ -18,7 +18,6 @@
   const KEEP = 30, SEND_LAST = 10, TTL = 24 * 3600 * 1000;
   const ERR_TEXT = "I couldn't reach the store just now. Please try again in a moment.";
 let starters = [
-  "What's on sale?",
   "How can I contact you?",
   "What are your shipping options?"
 ];
@@ -347,16 +346,23 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
   /* ---------- Clean Markdown Parser & Renderers ---------- */
   function renderMarkdown(rawText) {
     let text = String(rawText || '');
+    
+    // 1. Convert Markdown links [Text](Url)
     text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
       const cleanU = safeUrl(url);
       return cleanU ? `<a href="${cleanU}" target="_blank" rel="noopener noreferrer">${linkText}</a>` : linkText;
     });
+    
+    // 2. Convert raw URLs into proper clickable anchor tags (with the closing </a> tag fixed!)
     text = text.replace(/(https?:\/\/[^\s<"]+)/g, (url) => {
       const cleanUrl = url.replace(/[.,)]+$/, '');
       const cleanU = safeUrl(cleanUrl);
       return cleanU ? `<a href="${cleanU}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>` : url;
     });
+    
+    // 3. Convert bold text **text**
     text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    
     return text;
   }
 
