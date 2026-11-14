@@ -1,0 +1,9 @@
+{
+  "name": "sales-assistant-frontend",
+  "version": "1.0.0",
+  "main": "frontend.js",
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

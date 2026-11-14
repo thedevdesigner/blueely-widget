@@ -1,0 +1,7 @@
+name = "ai-sales-widget-edge"
+main = "worker.js"
+compatibility_date = "2026-02-15"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.min.js"]
