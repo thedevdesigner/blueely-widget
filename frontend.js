@@ -318,11 +318,18 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
     return n;
   };
   const safeUrl = (u) => { try { const x = new URL(u, location.href); return /^https?:$/.test(x.protocol) ? x.href : null; } catch (e) { return null; } };
-  function money(p) {
+ function money(p) {
     const n = Number(p.price);
     if (!Number.isFinite(n)) return '';
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: p.currency || 'USD' }).format(n); }
-    catch (e) { return n.toFixed(2); }
+    try { 
+      return new Intl.NumberFormat(undefined, { 
+        style: 'currency', 
+        currency: p.currency || activeCurrency.code 
+      }).format(n); 
+    }
+    catch (e) { 
+      return `${activeCurrency.symbol}${n.toFixed(2)}`; 
+    }
   }
 // --- ADD THIS CLEAR CHAT HANDLER ---
   $('clear-chat').addEventListener('click', () => {
@@ -344,33 +351,28 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
   const mobile = () => matchMedia('(max-width:480px)').matches;
 
 /* ---------- Stream & Network-Break Proof Markdown Parser ---------- */
-  function renderMarkdown(rawText) {
-    let text = String(rawText || '');
-    
-    // 1. Parse completed [Text](Url) markdown links safely
-    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
-      const cleanU = safeUrl(url);
-      return cleanU ? `<a href="${cleanU}" target="_blank" rel="noopener noreferrer">${linkText}</a>` : linkText;
-    });
-    
-    // 2. STREAM BREAK SAFETY NET: Catch dangling/broken markdown links caused by network drops
-    // If a link starts with [Text](... but never gets a closing parenthesis because the stream died, 
-    // this cleans it up into plain text so it doesn't leave ugly brackets on the screen.
-    text = text.replace(/\[([^\]]+)\]\(([^)]*)$/, '$1'); // Removes the broken dangling url wrapper at the very end
-    text = text.replace(/\[([^\]]*)$/, '$1');            // Removes an unclosed opening bracket at the very end
+function renderMarkdown(rawText) {
+  const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const held = [];                                           // finished <a> tags wait here so no later step can touch them
+  const hold = (html) => '\u0001' + (held.push(html) - 1) + '\u0001';
+  const anchor = (url, label) => hold(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`);
 
-    // 3. Pattern Match: Raw URLs (Protected against active markdown patterns)
-    text = text.replace(/(?<!\()\bhttps?:\/\/[^\s<"]+/g, (url) => {
-      const cleanUrl = url.replace(/[.,)]+$/, '');
-      const cleanU = safeUrl(cleanUrl);
-      return cleanU ? `<a href="${cleanU}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>` : url;
-    });
+  let text = String(rawText || '').replace(/[\u0000-\u0008\u000B-\u001F]/g, '');
 
-    // 4. Bold text **text**
-    text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    
-    return text;
-  }
+  // 1. complete [Text](Url) links
+  text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => { const u = safeUrl(url); return u ? anchor(u, label) : label; });
+
+  // 2. stream safety net: a link cut off by the stream shows as plain text until it completes
+  text = text.replace(/\[([^\]]+)\]\([^)]*$/, '$1');
+  text = text.replace(/\[([^\]]*)$/, '$1');
+
+  // 3. raw URLs (finished links are already placeholders, so they cannot be matched again)
+  text = text.replace(/https?:\/\/[^\s<>"']*[^\s<>"'.,;:!?)\]]/g, (url) => { const u = safeUrl(url); return u ? anchor(u, url) : url; });
+
+  // 4. everything left is plain text: escape it, then bold, then put the links back
+  text = esc(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return text.replace(/\u0001(\d+)\u0001/g, (m, i) => held[+i]);
+}
 
   function chipsEl(list) {
     const wrap = el('div', 'chips');
@@ -489,6 +491,59 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
     return { stop() { row.remove(); }, updateText(msg) { txt.textContent = msg; } };
   }
 
+  // 1. Your Comprehensive Region-to-Currency Map
+const regionToCurrencyMap = {
+  "US": { code: "USD", symbol: "$" },
+  "CA": { code: "CAD", symbol: "$" },
+  "GB": { code: "GBP", symbol: "£" },
+  "EU": { code: "EUR", symbol: "€" }, "DE": { code: "EUR", symbol: "€" }, "FR": { code: "EUR", symbol: "€" },
+  "NG": { code: "NGN", symbol: "₦" },
+  "GH": { code: "GHS", symbol: "₵" },
+  "KE": { code: "KES", symbol: "KSh" },
+  "ZA": { code: "ZAR", symbol: "R" },
+  "AU": { code: "AUD", symbol: "$" },
+  "IN": { code: "INR", symbol: "₹" },
+  "JP": { code: "JPY", symbol: "¥" }
+};
+
+// 2. The Fallback Currency Symbol Lookup
+const currencyCodeToSymbolMap = {
+  "USD": "$", "CAD": "$", "AUD": "$", "GBP": "£", "EUR": "€",
+  "NGN": "₦", "GHS": "₵", "KES": "KSh", "ZAR": "R", "INR": "₹", "JPY": "¥"
+};
+
+// 3. The Unified Detection Engine
+function detectStoreCurrency() {
+  // Check A: Shopify's native multi-currency object (e.g., "USD" or "NGN")
+  if (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) {
+    const code = window.Shopify.currency.active.toUpperCase();
+    const symbol = currencyCodeToSymbolMap[code] || code;
+    return { code, symbol };
+  }
+
+  // Check B: Store DOM meta tags (OpenGraph or Shopify wallet tags)
+  const metaCurrency = document.querySelector('meta[property="og:price:currency"]');
+  if (metaCurrency && metaCurrency.content) {
+    const code = metaCurrency.content.toUpperCase();
+    const symbol = currencyCodeToSymbolMap[code] || code;
+    return { code, symbol };
+  }
+
+  // Check C: Fallback to browser locale / region mapping from your list
+  const userLocale = navigator.language || navigator.userLanguage || "en-US";
+  const regionCode = userLocale.split('-')[1]?.toUpperCase();
+
+  if (regionCode && regionToCurrencyMap[regionCode]) {
+    return regionToCurrencyMap[regionCode]; // Returns { code: "...", symbol: "..." }
+  }
+
+  // Ultimate Default Fallback
+  return { code: "USD", symbol: "$" };
+}
+
+// Execute and store globally for your widget session
+const activeCurrency = detectStoreCurrency();
+console.log(`Active Currency Detected: ${activeCurrency.code} (${activeCurrency.symbol})`);
  /**
    * ==========================================================================
    * MASTER CONTROL PLAN: SUBORDINATE MESSAGING & HANDSHAKE ENGINE
@@ -519,6 +574,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/octet-stream' },
         body: JSON.stringify({
           vendorId: CFG.vendor,
+          currencyCode: activeCurrency.code,
           sessionId: state.sid,
           pageUrl: location.href,
           messages: state.items.filter((i) => !i.err).slice(-SEND_LAST).map((i) => ({ role: i.role, content: i.text || i.content })),
@@ -594,6 +650,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/octet-stream' },
         body: JSON.stringify({
           vendorId: CFG.vendor,
+          currencyCode: activeCurrency.code,
           sessionId: state.sid,
           pageUrl: location.href,
           messages: state.items.filter((i) => !i.err).slice(-SEND_LAST).map((i) => ({ role: i.role, content: i.text || i.content })),
